@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WEBAR Admin</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", sans-serif;
+      background: #f5f6f8;
+      color: #222;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      height: 100vh;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    .panel {
+      padding: 16px;
+      overflow-y: auto;
+      background: #fff;
+      border-left: 1px solid #ddd;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e3e3e3;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 12px;
+    }
+
+    h2 {
+      font-size: 16px;
+      margin: 0 0 10px;
+    }
+
+    .row {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .row.two {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #555;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #111;
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #666;
+    }
+
+    button.danger {
+      background: #c62828;
+    }
+
+    button.primary {
+      background: #007aff;
+    }
+
+    .muted {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .poi-list {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid #e3e3e3;
+      border-radius: 10px;
+      background: #fafafa;
+    }
+
+    .poi-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e9e9e9;
+      cursor: pointer;
+    }
+
+    .poi-item:hover {
+      background: #eef5ff;
+    }
+
+    .poi-item.active {
+      background: #dbeafe;
+    }
+
+    .thumb {
+      width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      background: #fafafa;
+      margin-top: 8px;
+    }
+
+    #status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #007aff;
+      white-space: pre-wrap;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 45vh 55vh;
+      }
+      .panel {
+        border-left: none;
+        border-top: 1px solid #ddd;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div id="map"></div>
+
+    <div class="panel">
+      <h1>WEBAR 管理画面</h1>
+
+      <div class="card" id="loginCard">
+        <h2>ログイン</h2>
+        <div class="row">
+          <div>
+            <label for="email">メールアドレス</label>
+            <input id="email" type="email" placeholder="admin@example.com">
+          </div>
+          <div>
+            <label for="password">パスワード</label>
+            <input id="password" type="password" placeholder="password">
+          </div>
+        </div>
+        <div class="btns">
+          <button class="primary" id="loginBtn">ログイン</button>
+          <button class="secondary" id="logoutBtn">ログアウト</button>
+        </div>
+        <div id="authStatus" class="muted">未ログイン</div>
+      </div>
+
+      <div class="card">
+        <h2>地点一覧</h2>
+        <div class="muted">地図をクリックすると新規地点を作成できます。</div>
+        <div id="poiListBox" class="poi-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>地点編集</h2>
+
+        <div class="row">
+          <div>
+            <label for="poiId">ID</label>
+            <input id="poiId" type="text" readonly>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="name">名称</label>
+            <input id="name" type="text" placeholder="例：本多伊予守忠廉">
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="summary">概要</label>
+            <textarea id="summary"></textarea>
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
+            <label for="han">藩名</label>
+            <input id="han" type="text">
+          </div>
+          <div>
+            <label for="role">役職</label>
+            <input id="role" type="text">
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="hanText">藩の説明</label>
+            <textarea id="hanText"></textarea>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="roleText">役職の説明</label>
+            <textarea id="roleText"></textarea>
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
+            <label for="lat">緯度</label>
+            <input id="lat" type="number" step="any">
+          </div>
+          <div>
+            <label for="lon">経度</label>
+            <input id="lon" type="number" step="any">
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
+            <label for="iconUrl">アイコンURL</label>
+            <input id="iconUrl" type="text" placeholder="./default.png または Storage URL">
+          </div>
+          <div>
+            <label for="imageUrl">詳細画像URL</label>
+            <input id="imageUrl" type="text" placeholder="Storage URL など">
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
+            <label for="category">カテゴリ</label>
+            <input id="category" type="text" placeholder="例：武家屋敷">
+          </div>
+          <div>
+            <label for="published">公開状態</label>
+            <select id="published">
+              <option value="true">公開</option>
+              <option value="false">非公開</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="imageFile">画像アップロード（詳細画像）</label>
+            <input id="imageFile" type="file" accept="image/*">
+            <button type="button" class="secondary" id="uploadImageBtn" style="margin-top:8px;">画像アップロード</button>
+            <img id="previewImage" class="thumb hidden" alt="">
+          </div>
+        </div>
+
+        <div class="btns">
+          <button class="primary" id="newBtn">新規作成</button>
+          <button class="primary" id="saveBtn">保存</button>
+          <button class="danger" id="deleteBtn">削除</button>
+          <button class="secondary" id="clearBtn">フォームクリア</button>
+        </div>
+
+        <div id="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+    import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let map;
+    let markerLayer;
+    let tempMarker = null;
+    let poiList = [];
+    let currentPoi = null;
+    let currentUser = null;
+
+    const defaultIcon = "./default.png";
+
+    const authStatus = document.getElementById("authStatus");
+    const statusEl = document.getElementById("status");
+    const poiListBox = document.getElementById("poiListBox");
+
+    const emailEl = document.getElementById("email");
+    const passwordEl = document.getElementById("password");
+
+    const poiIdEl = document.getElementById("poiId");
+    const nameEl = document.getElementById("name");
+    const summaryEl = document.getElementById("summary");
+    const hanEl = document.getElementById("han");
+    const hanTextEl = document.getElementById("hanText");
+    const roleEl = document.getElementById("role");
+    const roleTextEl = document.getElementById("roleText");
+    const latEl = document.getElementById("lat");
+    const lonEl = document.getElementById("lon");
+    const iconUrlEl = document.getElementById("iconUrl");
+    const imageUrlEl = document.getElementById("imageUrl");
+    const categoryEl = document.getElementById("category");
+    const publishedEl = document.getElementById("published");
+    const imageFileEl = document.getElementById("imageFile");
+    const previewImageEl = document.getElementById("previewImage");
+
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const newBtn = document.getElementById("newBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const deleteBtn = document.getElementById("deleteBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const uploadImageBtn = document.getElementById("uploadImageBtn");
+
+    function setStatus(msg, isError = false){
+      statusEl.style.color = isError ? "#c62828" : "#007aff";
+      statusEl.textContent = msg;
+    }
+
+    function getIconUrl(poi){
+      return poi.icon_url || defaultIcon;
+    }
+
+    function initMap(){
+      map = L.map("map").setView([35.6348, 139.7365], 16);
+
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
+
+      markerLayer = L.layerGroup().addTo(map);
+
+      map.on("click", (e) => {
+        const { lat, lng } = e.latlng;
+
+        const newPoi = {
+          id: "",
+          name: "",
+          summary: "",
+          han: "",
+          han_text: "",
+          role: "",
+          role_text: "",
+          lat,
+          lon: lng,
+          icon_url: defaultIcon,
+          image_url: "",
+          category: "",
+          published: true
+        };
+
+        currentPoi = newPoi;
+        fillForm(newPoi);
+        setTempMarker(lat, lng);
+        setStatus("新規地点を作成中です。必要事項を入力して保存してください。");
+      });
+    }
+
+    function setTempMarker(lat, lon){
+      if(tempMarker){
+        tempMarker.setLatLng([lat, lon]);
+      } else {
+        tempMarker = L.marker([lat, lon]).addTo(map);
+      }
+    }
+
+    function clearTempMarker(){
+      if(tempMarker){
+        map.removeLayer(tempMarker);
+        tempMarker = null;
+      }
+    }
+
+    async function loadPois(){
+      const { data, error } = await supabase
+        .from("pois")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if(error){
+        console.error(error);
+        setStatus(`一覧取得失敗: ${error.message}`, true);
+        return;
+      }
+
+      poiList = data || [];
+      renderPoiList();
+      drawMarkers();
+      setStatus(`${poiList.length} 件の地点を読み込みました。`);
+    }
+
+    function drawMarkers(){
+      markerLayer.clearLayers();
+
+      poiList.forEach((poi) => {
+        const icon = L.icon({
+          iconUrl: getIconUrl(poi),
+          iconSize: [64, 64],
+          iconAnchor: [32, 32]
+        });
+
+        const marker = L.marker([poi.lat, poi.lon], { icon }).addTo(markerLayer);
+        marker.on("click", () => {
+          currentPoi = { ...poi };
+          fillForm(currentPoi);
+          setTempMarker(poi.lat, poi.lon);
+          highlightPoiItem(poi.id);
+        });
+        marker.bindTooltip(poi.name || "(名称未設定)", { direction: "top" });
+      });
+    }
+
+    function renderPoiList(){
+      poiListBox.innerHTML = "";
+
+      poiList.forEach((poi) => {
+        const div = document.createElement("div");
+        div.className = "poi-item";
+        div.dataset.id = poi.id;
+        div.innerHTML = `
+          <div><strong>${escapeHtml(poi.name || "(名称未設定)")}</strong></div>
+          <div class="muted">${escapeHtml(poi.han || "")} / ${escapeHtml(poi.role || "")}</div>
+          <div class="muted">${poi.published ? "公開" : "非公開"}</div>
+        `;
+        div.addEventListener("click", () => {
+          currentPoi = { ...poi };
+          fillForm(currentPoi);
+          setTempMarker(poi.lat, poi.lon);
+          map.setView([poi.lat, poi.lon], 18);
+          highlightPoiItem(poi.id);
+        });
+        poiListBox.appendChild(div);
+      });
+    }
+
+    function highlightPoiItem(id){
+      [...poiListBox.querySelectorAll(".poi-item")].forEach(el => {
+        el.classList.toggle("active", el.dataset.id === id);
+      });
+    }
+
+    function fillForm(poi){
+      poiIdEl.value = poi.id || "";
+      nameEl.value = poi.name || "";
+      summaryEl.value = poi.summary || "";
+      hanEl.value = poi.han || "";
+      hanTextEl.value = poi.han_text || "";
+      roleEl.value = poi.role || "";
+      roleTextEl.value = poi.role_text || "";
+      latEl.value = poi.lat ?? "";
+      lonEl.value = poi.lon ?? "";
+      iconUrlEl.value = poi.icon_url || "";
+      imageUrlEl.value = poi.image_url || "";
+      categoryEl.value = poi.category || "";
+      publishedEl.value = String(!!poi.published);
+
+      if (poi.image_url) {
+        previewImageEl.src = poi.image_url;
+        previewImageEl.classList.remove("hidden");
+      } else {
+        previewImageEl.src = "";
+        previewImageEl.classList.add("hidden");
+      }
+    }
+
+    function readForm(){
+      return {
+        id: poiIdEl.value || undefined,
+        name: nameEl.value.trim(),
+        summary: summaryEl.value.trim(),
+        han: hanEl.value.trim(),
+        han_text: hanTextEl.value.trim(),
+        role: roleEl.value.trim(),
+        role_text: roleTextEl.value.trim(),
+        lat: parseFloat(latEl.value),
+        lon: parseFloat(lonEl.value),
+        icon_url: iconUrlEl.value.trim(),
+        image_url: imageUrlEl.value.trim(),
+        category: categoryEl.value.trim(),
+        published: publishedEl.value === "true"
+      };
+    }
+
+    function clearForm(){
+      currentPoi = null;
+      poiIdEl.value = "";
+      nameEl.value = "";
+      summaryEl.value = "";
+      hanEl.value = "";
+      hanTextEl.value = "";
+      roleEl.value = "";
+      roleTextEl.value = "";
+      latEl.value = "";
+      lonEl.value = "";
+      iconUrlEl.value = defaultIcon;
+      imageUrlEl.value = "";
+      categoryEl.value = "";
+      publishedEl.value = "true";
+      imageFileEl.value = "";
+      previewImageEl.src = "";
+      previewImageEl.classList.add("hidden");
+      clearTempMarker();
+      highlightPoiItem("__none__");
+      setStatus("フォームをクリアしました。");
+    }
+
+    function validatePoi(poi){
+      if(!poi.name) return "名称を入力してください。";
+      if(Number.isNaN(poi.lat) || Number.isNaN(poi.lon)) return "緯度・経度を正しく入力してください。";
+      return "";
+    }
+
+    async function savePoi(){
+      if(!currentUser){
+        setStatus("先にログインしてください。", true);
+        return;
+      }
+
+      const poi = readForm();
+      const errMsg = validatePoi(poi);
+      if(errMsg){
+        setStatus(errMsg, true);
+        return;
+      }
+
+      if(!poi.icon_url){
+        poi.icon_url = defaultIcon;
+      }
+
+      if(poi.id){
+        const id = poi.id;
+        delete poi.id;
+
+        const { error } = await supabase
+          .from("pois")
+          .update(poi)
+          .eq("id", id);
+
+        if(error){
+          console.error(error);
+          setStatus(`更新失敗: ${error.message}`, true);
+          return;
+        }
+
+        setStatus("地点を更新しました。");
+      } else {
+        const { error } = await supabase
+          .from("pois")
+          .insert([poi]);
+
+        if(error){
+          console.error(error);
+          setStatus(`新規保存失敗: ${error.message}`, true);
+          return;
+        }
+
+        setStatus("地点を新規保存しました。");
+      }
+
+      await loadPois();
+      clearTempMarker();
+    }
+
+    async function deletePoi(){
+      if(!currentUser){
+        setStatus("先にログインしてください。", true);
+        return;
+      }
+
+      const id = poiIdEl.value;
+      if(!id){
+        setStatus("削除対象が選択されていません。", true);
+        return;
+      }
+
+      const ok = confirm("この地点を削除しますか？");
+      if(!ok) return;
+
+      const { error } = await supabase
+        .from("pois")
+        .delete()
+        .eq("id", id);
+
+      if(error){
+        console.error(error);
+        setStatus(`削除失敗: ${error.message}`, true);
+        return;
+      }
+
+      clearForm();
+      await loadPois();
+      setStatus("地点を削除しました。");
+    }
+
+    async function login(){
+      const email = emailEl.value.trim();
+      const password = passwordEl.value;
+
+      if(!email || !password){
+        authStatus.textContent = "メールアドレスとパスワードを入力してください。";
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if(error){
+        console.error(error);
+        authStatus.textContent = `ログイン失敗: ${error.message}`;
+        return;
+      }
+
+      currentUser = data.user;
+      authStatus.textContent = `ログイン中: ${currentUser.email}`;
+      setStatus("ログインしました。");
+    }
+
+    async function logout(){
+      const { error } = await supabase.auth.signOut();
+      if(error){
+        console.error(error);
+        authStatus.textContent = `ログアウト失敗: ${error.message}`;
+        return;
+      }
+
+      currentUser = null;
+      authStatus.textContent = "未ログイン";
+      setStatus("ログアウトしました。");
+    }
+
+    async function restoreSession(){
+      const { data } = await supabase.auth.getUser();
+      currentUser = data.user || null;
+      authStatus.textContent = currentUser
+        ? `ログイン中: ${currentUser.email}`
+        : "未ログイン";
+    }
+
+    async function uploadImage(){
+      if(!currentUser){
+        setStatus("先にログインしてください。", true);
+        return;
+      }
+
+      const file = imageFileEl.files[0];
+      if(!file){
+        setStatus("アップロードする画像を選択してください。", true);
+        return;
+      }
+
+      const ext = file.name.split(".").pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const path = `poi-images/${fileName}`;
+
+      const { error } = await supabase.storage
+        .from("poi-images")
+        .upload(fileName, file, {
+          cacheControl: "3600",
+          upsert: false
+        });
+
+      if(error){
+        console.error(error);
+        setStatus(`画像アップロード失敗: ${error.message}`, true);
+        return;
+      }
+
+      const { data } = supabase.storage
+        .from("poi-images")
+        .getPublicUrl(fileName);
+
+      imageUrlEl.value = data.publicUrl;
+      previewImageEl.src = data.publicUrl;
+      previewImageEl.classList.remove("hidden");
+      setStatus("画像アップロード完了。image_url に反映しました。");
+    }
+
+    function escapeHtml(s){
+      return String(s ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;");
+    }
+
+    loginBtn.addEventListener("click", login);
+    logoutBtn.addEventListener("click", logout);
+    newBtn.addEventListener("click", clearForm);
+    saveBtn.addEventListener("click", savePoi);
+    deleteBtn.addEventListener("click", deletePoi);
+    clearBtn.addEventListener("click", clearForm);
+    uploadImageBtn.addEventListener("click", uploadImage);
+
+    imageUrlEl.addEventListener("input", () => {
+      const url = imageUrlEl.value.trim();
+      if(url){
+        previewImageEl.src = url;
+        previewImageEl.classList.remove("hidden");
+      } else {
+        previewImageEl.src = "";
+        previewImageEl.classList.add("hidden");
+      }
+    });
+
+    async function boot(){
+      initMap();
+      await restoreSession();
+      await loadPois();
+      iconUrlEl.value = defaultIcon;
+    }
+
+    boot();
+  </script>
+</body>
+</html>

@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WEBAR Historical Map</title>
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
+
+  <!-- A-Frame / AR.js -->
+  <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+  <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar.js"></script>
+
+  <style>
+    body { margin:0; overflow:hidden; font-family:"Helvetica Neue",sans-serif; }
+
+    #topbar{
+      position:fixed; top:10px; left:10px; right:10px;
+      display:flex; gap:10px;
+      z-index:2000;
+      pointer-events:none;
+    }
+    .btn{
+      pointer-events:auto;
+      flex:1;
+      padding:12px 10px;
+      border:none;
+      border-radius:12px;
+      background:#111;
+      color:#fff;
+      font-size:15px;
+      opacity:.92;
+      cursor:pointer;
+    }
+    .btn.active{ background:#007aff; }
+
+    .view{
+      position:fixed; inset:0;
+      display:none;
+      z-index:1;
+    }
+    .view.active{ display:block; }
+
+    #map{ width:100%; height:100%; }
+
+    #popup{
+      position:fixed; left:50%; top:50%;
+      transform:translate(-50%,-50%);
+      background:#fff; color:#000;
+      padding:18px; border-radius:14px;
+      box-shadow:0 10px 28px rgba(0,0,0,.35);
+      width:90%; max-width:420px; max-height:80vh;
+      display:none; z-index:3000;
+      overflow-y:auto;
+    }
+    #popup h2{ margin:0 0 8px; font-size:18px; }
+    #popup img{ width:100%; border-radius:10px; margin:10px 0; display:none; }
+    #popup p{ margin:0; font-size:14px; line-height:1.6; }
+    #popup button{
+      margin-top:14px;
+      padding:10px 18px;
+      border:none;
+      border-radius:10px;
+      background:#007aff; color:#fff;
+      font-size:15px; cursor:pointer;
+      width:100%;
+    }
+
+    #logs{
+      position:fixed; bottom:0; left:0; right:0;
+      background:rgba(0,0,0,.55); color:#0f0;
+      padding:6px 8px; font-size:11px;
+      z-index:2500;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .leaflet-control-attribution{
+      margin-bottom:42px !important;
+    }
+
+    #viewAR, #arMount {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #arMount a-scene {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #arMount canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="topbar">
+    <button id="btnMap" class="btn active" onclick="showView('map')">地図（2D）</button>
+    <button id="btnAR" class="btn" onclick="showView('ar')">AR</button>
+  </div>
+
+  <div id="popup">
+    <h2 id="popupTitle">タイトル</h2>
+    <img id="popupImg" src="" alt="">
+    <p id="popupText"></p>
+    <button onclick="closePopup()">閉じる</button>
+  </div>
+
+  <div id="logs">読み込み中...</div>
+
+  <div id="viewMap" class="view active">
+    <div id="map"></div>
+  </div>
+
+  <div id="viewAR" class="view">
+    <div id="arMount"></div>
+  </div>
+
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+    import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const defaultIcon = "./default.png";
+
+    let poiList = [];
+    let popupData = {};
+    let map, userMarker, markerLayer;
+    let arSceneEl = null;
+
+    const popup = document.getElementById("popup");
+    const popupTitle = document.getElementById("popupTitle");
+    const popupText = document.getElementById("popupText");
+    const popupImg = document.getElementById("popupImg");
+    const logs = document.getElementById("logs");
+
+    const viewMap = document.getElementById("viewMap");
+    const viewAR  = document.getElementById("viewAR");
+    const btnMap  = document.getElementById("btnMap");
+    const btnAR   = document.getElementById("btnAR");
+    const arMount = document.getElementById("arMount");
+
+    function escHtml(s){
+      return String(s ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;");
+    }
+
+    function nl2br(s){
+      return escHtml(s).replace(/\n/g, "<br>");
+    }
+
+    function getKamonIcon(poi){
+      return poi.icon_url || defaultIcon;
+    }
+
+    async function loadPois(){
+      logs.textContent = "公開データ取得中...";
+      const { data, error } = await supabase
+        .from("pois")
+        .select("*")
+        .eq("published", true)
+        .order("created_at", { ascending: true });
+
+      if(error){
+        console.error(error);
+        logs.textContent = `データ取得失敗: ${error.message}`;
+        return;
+      }
+
+      poiList = data || [];
+      popupData = Object.fromEntries(poiList.map(p => [p.id, p]));
+      logs.textContent = `公開データ ${poiList.length} 件を読み込みました`;
+    }
+
+    function openPopup(poi) {
+      popupTitle.textContent = poi.name || "";
+
+      if (poi.image_url) {
+        popupImg.src = poi.image_url;
+        popupImg.style.display = "block";
+      } else {
+        popupImg.style.display = "none";
+      }
+
+      popupText.innerHTML = `
+        <div style="font-size:12px; opacity:.75; margin-bottom:8px;">
+          藩：<b>${escHtml(poi.han || "")}</b> ／ 役職：<b>${escHtml(poi.role || "")}</b>
+        </div>
+
+        <div style="border-top:1px solid #eee; padding-top:10px;">
+          <div style="font-weight:700; margin-bottom:4px;">概要</div>
+          <div style="font-size:14px; line-height:1.65;">${nl2br(poi.summary || "")}</div>
+        </div>
+
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer; font-weight:700;">藩の説明</summary>
+          <div style="margin-top:6px; font-size:14px; line-height:1.65;">${nl2br(poi.han_text || "")}</div>
+        </details>
+
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer; font-weight:700;">役職の説明</summary>
+          <div style="margin-top:6px; font-size:14px; line-height:1.65;">${nl2br(poi.role_text || "")}</div>
+        </details>
+      `;
+
+      popup.style.display = "block";
+    }
+
+    function closePopup() {
+      popup.style.display = "none";
+    }
+    window.closePopup = closePopup;
+
+    function showView(which){
+      if(which === "map"){
+        viewMap.classList.add("active");
+        viewAR.classList.remove("active");
+        btnMap.classList.add("active");
+        btnAR.classList.remove("active");
+        destroyAR();
+        logs.textContent = "[MAP] 表示中";
+      }else{
+        viewAR.classList.add("active");
+        viewMap.classList.remove("active");
+        btnAR.classList.add("active");
+        btnMap.classList.remove("active");
+        buildAR();
+        logs.textContent = "[AR] 表示中";
+      }
+    }
+    window.showView = showView;
+
+    function initMap(){
+      map = L.map("map").setView([35.6348, 139.7365], 16);
+
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      markerLayer = L.layerGroup().addTo(map);
+      drawMapMarkers();
+
+      if(navigator.geolocation){
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            const { latitude, longitude, accuracy } = pos.coords;
+            const ll = [latitude, longitude];
+
+            if(!userMarker){
+              userMarker = L.circleMarker(ll, { radius: 8 }).addTo(map);
+            }else{
+              userMarker.setLatLng(ll);
+            }
+
+            logs.textContent = `[MAP] lat:${latitude.toFixed(6)} lon:${longitude.toFixed(6)} acc:${Math.round(accuracy)}m`;
+          },
+          (err) => {
+            logs.textContent = `[MAP] 位置情報エラー: ${err.message}`;
+          },
+          { enableHighAccuracy:true, maximumAge:1000, timeout:8000 }
+        );
+      }
+    }
+
+    function drawMapMarkers(){
+      markerLayer.clearLayers();
+
+      poiList.forEach((poi) => {
+        const icon = L.icon({
+          iconUrl: getKamonIcon(poi),
+          iconSize: [72, 72],
+          iconAnchor: [36, 36],
+          popupAnchor: [0, -18]
+        });
+
+        const m = L.marker([poi.lat, poi.lon], { icon }).addTo(markerLayer);
+        m.on("click", () => openPopup(poi));
+        m.bindTooltip(poi.name, { direction:"top" });
+      });
+    }
+
+    function buildAR(){
+      if(arSceneEl) return;
+
+      const assetsHtml = poiList.map((poi) => {
+        const icon = getKamonIcon(poi);
+        return `<img id="asset_${poi.id}" src="${icon}" crossorigin="anonymous">`;
+      }).join("");
+
+      const markersHtml = poiList.map((poi) => {
+        return `
+          <a-image
+            id="${poi.id}"
+            class="clickable"
+            src="#asset_${poi.id}"
+            width="22"
+            height="22"
+            look-at="[gps-camera]"
+            gps-entity-place="latitude: ${poi.lat}; longitude: ${poi.lon};"
+            visible="true">
+          </a-image>
+        `;
+      }).join("");
+
+      const sceneHtml = `
+        <a-scene
+          embedded
+          vr-mode-ui="enabled: false"
+          arjs="sourceType: webcam; debugUIEnabled: false; gpsMinDistance: 0; gpsTimeInterval: 1000;"
+        >
+          <a-assets>
+            ${assetsHtml}
+          </a-assets>
+
+          ${markersHtml}
+
+          <a-camera gps-camera rotation-reader>
+            <a-cursor
+              fuse="false"
+              raycaster="objects: .clickable"
+              geometry="primitive: circle; radius: 0.003"
+              material="color: black; opacity: 0.8">
+            </a-cursor>
+          </a-camera>
+        </a-scene>
+      `;
+
+      arMount.innerHTML = sceneHtml;
+      arSceneEl = arMount.querySelector("a-scene");
+
+      arSceneEl.querySelectorAll(".clickable").forEach(el => {
+        el.addEventListener("click", () => {
+          const poi = popupData[el.id];
+          if(poi) openPopup(poi);
+        });
+      });
+
+      window.addEventListener("gps-camera-update-position", onArGpsUpdate);
+      window.addEventListener("gps-camera-error", onArGpsError);
+    }
+
+    function destroyAR(){
+      if(!arSceneEl) return;
+      window.removeEventListener("gps-camera-update-position", onArGpsUpdate);
+      window.removeEventListener("gps-camera-error", onArGpsError);
+      arMount.innerHTML = "";
+      arSceneEl = null;
+    }
+
+    function onArGpsError(e){
+      logs.textContent = `[AR] gps error: ${JSON.stringify(e.detail || e)}`;
+    }
+
+    function onArGpsUpdate(e){
+      const { latitude, longitude, accuracy } = e.detail.position;
+      logs.textContent = `[AR] gps ok lat:${latitude.toFixed(6)} lon:${longitude.toFixed(6)} acc:${Math.round(accuracy)}m`;
+
+      const toRad = d => d * Math.PI / 180;
+      const R = 6371000;
+
+      poiList.forEach((poi) => {
+        const markerEl = document.getElementById(poi.id);
+        if(!markerEl) return;
+
+        const dLat = toRad(poi.lat - latitude);
+        const dLon = toRad(poi.lon - longitude);
+
+        const a =
+          Math.sin(dLat/2)**2 +
+          Math.cos(toRad(latitude)) *
+          Math.cos(toRad(poi.lat)) *
+          Math.sin(dLon/2)**2;
+
+        const dist = 2 * R * Math.asin(Math.sqrt(a));
+
+        const minScale = 1.0;
+        const maxScale = 0.3;
+        const maxDist  = 60;
+
+        const d = Math.min(dist, maxDist);
+        const t = d / maxDist;
+        const scale = minScale * (1 - t) + maxScale * t;
+
+        markerEl.setAttribute("scale", `${scale} ${scale} ${scale}`);
+        markerEl.setAttribute("material", `opacity: 1.0`);
+      });
+    }
+
+    async function boot(){
+      await loadPois();
+      initMap();
+    }
+
+    boot();
+  </script>
+</body>
+</html>
