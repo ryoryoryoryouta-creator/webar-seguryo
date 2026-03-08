@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WEBAR Admin</title>
+  <title>WEBAR Admin (Anonymous)</title>
 
   <link
     rel="stylesheet"
@@ -188,23 +188,9 @@
     <div class="panel">
       <h1>WEBAR 管理画面</h1>
 
-      <div class="card" id="loginCard">
-        <h2>ログイン</h2>
-        <div class="row">
-          <div>
-            <label for="email">メールアドレス</label>
-            <input id="email" type="email" placeholder="admin@example.com">
-          </div>
-          <div>
-            <label for="password">パスワード</label>
-            <input id="password" type="password" placeholder="password">
-          </div>
-        </div>
-        <div class="btns">
-          <button class="primary" id="loginBtn">ログイン</button>
-          <button class="secondary" id="logoutBtn">ログアウト</button>
-        </div>
-        <div id="authStatus" class="muted">未ログイン</div>
+      <div class="card">
+        <h2>接続状態</h2>
+        <div id="authStatus" class="muted">接続確認中...</div>
       </div>
 
       <div class="card">
@@ -338,9 +324,6 @@
     const statusEl = document.getElementById("status");
     const poiListBox = document.getElementById("poiListBox");
 
-    const emailEl = document.getElementById("email");
-    const passwordEl = document.getElementById("password");
-
     const poiIdEl = document.getElementById("poiId");
     const nameEl = document.getElementById("name");
     const summaryEl = document.getElementById("summary");
@@ -357,8 +340,6 @@
     const imageFileEl = document.getElementById("imageFile");
     const previewImageEl = document.getElementById("previewImage");
 
-    const loginBtn = document.getElementById("loginBtn");
-    const logoutBtn = document.getElementById("logoutBtn");
     const newBtn = document.getElementById("newBtn");
     const saveBtn = document.getElementById("saveBtn");
     const deleteBtn = document.getElementById("deleteBtn");
@@ -566,7 +547,7 @@
 
     async function savePoi(){
       if(!currentUser){
-        setStatus("先にログインしてください。", true);
+        setStatus("接続がまだ完了していません。", true);
         return;
       }
 
@@ -617,7 +598,7 @@
 
     async function deletePoi(){
       if(!currentUser){
-        setStatus("先にログインしてください。", true);
+        setStatus("接続がまだ完了していません。", true);
         return;
       }
 
@@ -646,55 +627,9 @@
       setStatus("地点を削除しました。");
     }
 
-    async function login(){
-      const email = emailEl.value.trim();
-      const password = passwordEl.value;
-
-      if(!email || !password){
-        authStatus.textContent = "メールアドレスとパスワードを入力してください。";
-        return;
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if(error){
-        console.error(error);
-        authStatus.textContent = `ログイン失敗: ${error.message}`;
-        return;
-      }
-
-      currentUser = data.user;
-      authStatus.textContent = `ログイン中: ${currentUser.email}`;
-      setStatus("ログインしました。");
-    }
-
-    async function logout(){
-      const { error } = await supabase.auth.signOut();
-      if(error){
-        console.error(error);
-        authStatus.textContent = `ログアウト失敗: ${error.message}`;
-        return;
-      }
-
-      currentUser = null;
-      authStatus.textContent = "未ログイン";
-      setStatus("ログアウトしました。");
-    }
-
-    async function restoreSession(){
-      const { data } = await supabase.auth.getUser();
-      currentUser = data.user || null;
-      authStatus.textContent = currentUser
-        ? `ログイン中: ${currentUser.email}`
-        : "未ログイン";
-    }
-
     async function uploadImage(){
       if(!currentUser){
-        setStatus("先にログインしてください。", true);
+        setStatus("接続がまだ完了していません。", true);
         return;
       }
 
@@ -706,7 +641,6 @@
 
       const ext = file.name.split(".").pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      const path = `poi-images/${fileName}`;
 
       const { error } = await supabase.storage
         .from("poi-images")
@@ -731,6 +665,34 @@
       setStatus("画像アップロード完了。image_url に反映しました。");
     }
 
+    async function ensureAnonymousLogin(){
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+
+        if (sessionData.session) {
+          currentUser = sessionData.session.user;
+          authStatus.textContent = `接続済み（匿名）: ${currentUser.id}`;
+          return;
+        }
+
+        const { data, error } = await supabase.auth.signInAnonymously();
+
+        if (error) {
+          console.error(error);
+          authStatus.textContent = `匿名ログイン失敗: ${error.message}`;
+          setStatus(`匿名ログイン失敗: ${error.message}`, true);
+          return;
+        }
+
+        currentUser = data.user;
+        authStatus.textContent = `接続済み（匿名）: ${currentUser.id}`;
+      } catch (err) {
+        console.error(err);
+        authStatus.textContent = `接続エラー: ${err.message}`;
+        setStatus(`接続エラー: ${err.message}`, true);
+      }
+    }
+
     function escapeHtml(s){
       return String(s ?? "")
         .replaceAll("&","&amp;")
@@ -738,8 +700,6 @@
         .replaceAll(">","&gt;");
     }
 
-    loginBtn.addEventListener("click", login);
-    logoutBtn.addEventListener("click", logout);
     newBtn.addEventListener("click", clearForm);
     saveBtn.addEventListener("click", savePoi);
     deleteBtn.addEventListener("click", deletePoi);
@@ -759,7 +719,7 @@
 
     async function boot(){
       initMap();
-      await restoreSession();
+      await ensureAnonymousLogin();
       await loadPois();
       iconUrlEl.value = defaultIcon;
     }
