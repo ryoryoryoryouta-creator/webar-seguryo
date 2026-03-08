@@ -545,6 +545,7 @@
       return "";
     }
 
+
     async function savePoi(){
       if(!currentUser){
         setStatus("接続がまだ完了していません。", true);
@@ -557,41 +558,45 @@
         setStatus(errMsg, true);
         return;
       }
-
+    
       if(!poi.icon_url){
         poi.icon_url = defaultIcon;
       }
-
+    
       if(poi.id){
         const id = poi.id;
-        delete poi.id;
-
+        const updatePayload = { ...poi };
+        delete updatePayload.id;
+    
         const { error } = await supabase
           .from("pois")
-          .update(poi)
+          .update(updatePayload)
           .eq("id", id);
-
+    
         if(error){
           console.error(error);
           setStatus(`更新失敗: ${error.message}`, true);
           return;
         }
-
+    
         setStatus("地点を更新しました。");
       } else {
+        const insertPayload = { ...poi };
+        delete insertPayload.id;
+    
         const { error } = await supabase
           .from("pois")
-          .insert([poi]);
-
+          .insert([insertPayload]);
+    
         if(error){
           console.error(error);
           setStatus(`新規保存失敗: ${error.message}`, true);
           return;
         }
-
+    
         setStatus("地点を新規保存しました。");
       }
-
+    
       await loadPois();
       clearTempMarker();
     }
